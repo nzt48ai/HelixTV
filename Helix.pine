@@ -1,0 +1,645 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Copyright Helix 2026
+
+//@version=6
+indicator("Helix™", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+
+//------------------------------------------------------------------------------
+// Constants
+//------------------------------------------------------------------------------
+string TZ = "America/New_York"
+color COLOR_TRANSPARENT = #ffffff00
+
+//------------------------------------------------------------------------------
+// Types
+//------------------------------------------------------------------------------
+type Candle
+    float o
+    float c
+    float h
+    float l
+    int o_idx
+    int c_idx
+    int h_idx
+    int l_idx
+    box body
+    line wick_up
+    line wick_down
+
+type Trace
+    line o
+    line c
+    line h
+    line l
+    label o_l
+    label c_l
+    label h_l
+    label l_l
+
+type CandleSettings
+    bool show
+    string htf
+    int max_display
+
+type Settings
+    color bull_body
+    color bull_border
+    color bull_wick
+    color bear_body
+    color bear_border
+    color bear_wick
+    int offset
+    int buffer
+    int width
+    bool use_custom_daily
+    string custom_daily_time
+    bool trace_show
+    color trace_o_color
+    string trace_o_style
+    int trace_o_size
+    color trace_c_color
+    string trace_c_style
+    int trace_c_size
+    color trace_h_color
+    string trace_h_style
+    int trace_h_size
+    color trace_l_color
+    string trace_l_style
+    int trace_l_size
+    bool price_label_show
+    color price_label_color
+    string price_label_size
+
+type CandleSet
+    array<Candle> candles
+    CandleSettings settings
+
+//------------------------------------------------------------------------------
+// Globals
+//------------------------------------------------------------------------------
+Settings settings = Settings.new()
+var Trace trace = Trace.new()
+
+var CandleSettings settingsHTF = CandleSettings.new()
+var array<Candle> candles = array.new<Candle>()
+var CandleSet htf = CandleSet.new()
+
+htf.settings := settingsHTF
+htf.candles := candles
+
+var box[] org_boxes = array.new_box()
+var line[] org_mid_lines = array.new_line()
+var line[] org_q25_lines = array.new_line()
+var line[] org_q75_lines = array.new_line()
+var label[] org_mid_labels = array.new_label()
+var bool[] org_gap_directions = array.new_bool()
+
+//------------------------------------------------------------------------------
+// Inputs
+//------------------------------------------------------------------------------
+string group_source = "HTF Candles"
+string group_style = "Styling"
+string group_trace = "Key Levels"
+string group_org = "ORG (Opening Range Gaps)"
+string group_org_time = "ORG Time"
+string group_org_levels = "ORG Quadrants"
+
+htf.settings.show := input.bool(true, "On", group=group_source, display=display.none)
+htf_mode = input.string("Timeframe", "Custom Timeframe", options=["Timeframe", "Custom"], group=group_source, display=display.none)
+preset_htf = input.timeframe("1W", "Timeframe", group=group_source, display=display.none)
+_sep_htf = input.string("", "────────", options=[""], group=group_source, display=display.none)
+custom_unit = input.string("Hours", "Custom", options=["Minutes", "Hours"], inline="customtf", group=group_source, display=display.none)
+custom_value = input.int(7, "", minval=1, inline="customtf", group=group_source, display=display.none)
+htf.settings.max_display := input.int(1, "Candles to Display", minval=1, maxval=50, group=group_source, display=display.none)
+
+settings.use_custom_daily := input.bool(false, "Custom daily candle open", inline="customdaily", group=group_source, display=display.none)
+settings.custom_daily_time := input.string("0930", "HHMM", inline="customdaily", group=group_source, tooltip="Used only when HTF is 1D. Example: 0000, 0830, 0930, 1800", display=display.none)
+
+settings.bull_body := input.color(#1dc677, "Bull Body", inline="body", group=group_style)
+settings.bear_body := input.color(#000000, "", inline="body", group=group_style)
+settings.bull_border := input.color(#000000, "Borders", inline="borders", group=group_style)
+settings.bear_border := input.color(#000000, "", inline="borders", group=group_style)
+settings.bull_wick := input.color(#000000, "Wick", inline="wick", group=group_style)
+settings.bear_wick := input.color(#000000, "", inline="wick", group=group_style)
+
+settings.offset := input.int(10, "Padding from current candles", minval=1, group=group_style, display=display.none)
+settings.buffer := input.int(1, "Space between candles", minval=1, maxval=4, group=group_style, display=display.none)
+settings.width := input.int(1, "Candle Width", minval=1, maxval=4, group=group_style, display=display.none) * 2
+
+settings.trace_show := input.bool(false, "On", group=group_trace, display=display.none)
+settings.trace_o_color := input.color(color.new(color.gray, 50), "Open", inline="1", group=group_trace)
+settings.trace_o_style := input.string("....", "", options=["Solid", "----", "...."], inline="1", group=group_trace, display=display.none)
+settings.trace_o_size := input.int(1, "", options=[1, 2, 3, 4], inline="1", group=group_trace, display=display.none)
+
+settings.trace_c_color := input.color(color.new(color.gray, 50), "Close", inline="2", group=group_trace)
+settings.trace_c_style := input.string("....", "", options=["Solid", "----", "...."], inline="2", group=group_trace, display=display.none)
+settings.trace_c_size := input.int(1, "", options=[1, 2, 3, 4], inline="2", group=group_trace, display=display.none)
+
+settings.trace_h_color := input.color(color.new(color.gray, 50), "High", inline="3", group=group_trace)
+settings.trace_h_style := input.string("....", "", options=["Solid", "----", "...."], inline="3", group=group_trace, display=display.none)
+settings.trace_h_size := input.int(1, "", options=[1, 2, 3, 4], inline="3", group=group_trace, display=display.none)
+
+settings.trace_l_color := input.color(color.new(color.gray, 50), "Low", inline="4", group=group_trace)
+settings.trace_l_style := input.string("....", "", options=["Solid", "----", "...."], inline="4", group=group_trace, display=display.none)
+settings.trace_l_size := input.int(1, "", options=[1, 2, 3, 4], inline="4", group=group_trace, display=display.none)
+
+settings.price_label_show := input.bool(false, "Price Label", inline="label", group=group_trace, display=display.none)
+settings.price_label_color := input.color(#000000, "", inline="label", group=group_trace)
+settings.price_label_size := input.string(size.small, "", options=[size.tiny, size.small, size.normal, size.large, size.huge], inline="label", group=group_trace, display=display.none)
+
+_sep_org = input.string("", "────────", options=[""], group=group_trace, display=display.none)
+
+// ORG inputs
+org_show = input.bool(true, "On", group=group_org, display=display.none)
+org_extend = input.bool(true, "Extend Boxes", group=group_org, display=display.none)
+org_keep_last = input.int(1, "Keep Last", minval=1, group=group_org, display=display.none)
+org_tf_limit = input.timeframe("240", "Timeframe Limit", group=group_org, display=display.none)
+
+org_start_hour = input.int(4, "Gap Start", minval=1, maxval=12, inline="orgstart", group=group_org_time, display=display.none)
+org_start_minute = input.int(14, "", minval=0, maxval=59, inline="orgstart", group=group_org_time, display=display.none)
+org_start_ampm = input.string("PM", "", options=["AM", "PM"], inline="orgstart", group=group_org_time, display=display.none)
+
+org_end_hour = input.int(9, "Gap End", minval=1, maxval=12, inline="orgend", group=group_org_time, display=display.none)
+org_end_minute = input.int(30, "", minval=0, maxval=59, inline="orgend", group=group_org_time, display=display.none)
+org_end_ampm = input.string("AM", "", options=["AM", "PM"], inline="orgend", group=group_org_time, display=display.none)
+
+org_gap_up_fill = input.color(color.new(#089981, 65), "Gap Up Fill", group=group_org, inline="orgfill", display=display.none)
+org_gap_down_fill = input.color(color.new(#f48fb1, 65), "", group=group_org, inline="orgfill", display=display.none)
+
+org_up_mid_color = input.color(#089981, "Up 50%", inline="midup", group=group_org_levels, display=display.none)
+org_mid_show = input.bool(true, "", inline="midup", group=group_org_levels, display=display.none)
+org_mid_style = input.string("....", "", options=["Solid", "----", "...."], inline="midup", group=group_org_levels, display=display.none)
+org_mid_width = input.int(1, "", options=[1, 2, 3, 4], inline="midup", group=group_org_levels, display=display.none)
+
+org_up_q25_color = input.color(#089981, "Up 25%", inline="q25up", group=group_org_levels, display=display.none)
+org_q25_show = input.bool(false, "", inline="q25up", group=group_org_levels, display=display.none)
+org_q25_style = input.string("....", "", options=["Solid", "----", "...."], inline="q25up", group=group_org_levels, display=display.none)
+org_q25_width = input.int(1, "", options=[1, 2, 3, 4], inline="q25up", group=group_org_levels, display=display.none)
+
+org_up_q75_color = input.color(#089981, "Up 75%", inline="q75up", group=group_org_levels, display=display.none)
+org_q75_show = input.bool(false, "", inline="q75up", group=group_org_levels, display=display.none)
+org_q75_style = input.string("....", "", options=["Solid", "----", "...."], inline="q75up", group=group_org_levels, display=display.none)
+org_q75_width = input.int(1, "", options=[1, 2, 3, 4], inline="q75up", group=group_org_levels, display=display.none)
+
+org_dn_mid_color = input.color(#f06292, "Down 50%", inline="middn", group=group_org_levels, display=display.none)
+org_dn_q25_color = input.color(#f06292, "Down 25%", inline="q25dn", group=group_org_levels, display=display.none)
+org_dn_q75_color = input.color(#f06292, "Down 75%", inline="q75dn", group=group_org_levels, display=display.none)
+
+string selected_htf = htf_mode == "Timeframe" ? preset_htf : str.tostring(custom_unit == "Hours" ? custom_value * 60 : custom_value)
+htf.settings.htf := selected_htf
+
+//------------------------------------------------------------------------------
+// Helpers
+//------------------------------------------------------------------------------
+line_style_from_string(string style) =>
+    switch style
+        "----" => line.style_dashed
+        "...." => line.style_dotted
+        => line.style_solid
+
+two_digit(int n) =>
+    str.tostring(n, "00")
+
+to_24_hour(int hour12, string ampm) =>
+    int h = hour12 % 12
+    if ampm == "PM"
+        h += 12
+    h
+
+build_session_from_ampm(int sh, int sm, string sap, int eh, int em, string eap) =>
+    two_digit(to_24_hour(sh, sap)) + two_digit(sm) + "-" + two_digit(to_24_hour(eh, eap)) + two_digit(em)
+
+sanitize_hhmm(string raw) =>
+    string clean = str.replace_all(raw, ":", "")
+    bool validLen = str.length(clean) == 4
+    float parsed = validLen ? str.tonumber(clean) : na
+    bool validNum = not na(parsed)
+    int hh = validNum ? int(str.tonumber(str.substring(clean, 0, 2))) : 9
+    int mm = validNum ? int(str.tonumber(str.substring(clean, 2, 4))) : 30
+    hh := math.max(0, math.min(23, hh))
+    mm := math.max(0, math.min(59, mm))
+    two_digit(hh) + two_digit(mm)
+
+build_one_minute_session(string hhmm) =>
+    int hh = int(str.tonumber(str.substring(hhmm, 0, 2)))
+    int mm = int(str.tonumber(str.substring(hhmm, 2, 4)))
+    int total = hh * 60 + mm
+    int totalEnd = (total + 1) % 1440
+    int endHH = int(math.floor(totalEnd / 60))
+    int endMM = totalEnd % 60
+    hhmm + "-" + two_digit(endHH) + two_digit(endMM) + ":1234567"
+
+day_stamp(int dow) =>
+    switch dow
+        1 => "Mon"
+        2 => "Tue"
+        3 => "Wed"
+        4 => "Thu"
+        5 => "Fri"
+        6 => "Sat"
+        7 => "Sun"
+        => ""
+
+format_org_date(int ts) =>
+    day_stamp(dayofweek(ts, TZ)) + "." + str.format_time(ts, "MM/dd/yy", TZ)
+
+valid_timeframe(string HTF) =>
+    int chartSec = timeframe.in_seconds()
+    int htfSec = timeframe.in_seconds(HTF)
+    if htfSec >= timeframe.in_seconds("D") and htfSec > chartSec
+        true
+    else
+        chartSec < htfSec and math.round(htfSec / chartSec) == htfSec / chartSec
+
+clear_trace() =>
+    if not na(trace.o)
+        line.delete(trace.o)
+        trace.o := na
+    if not na(trace.c)
+        line.delete(trace.c)
+        trace.c := na
+    if not na(trace.h)
+        line.delete(trace.h)
+        trace.h := na
+    if not na(trace.l)
+        line.delete(trace.l)
+        trace.l := na
+    if not na(trace.o_l)
+        label.delete(trace.o_l)
+        trace.o_l := na
+    if not na(trace.c_l)
+        label.delete(trace.c_l)
+        trace.c_l := na
+    if not na(trace.h_l)
+        label.delete(trace.h_l)
+        trace.h_l := na
+    if not na(trace.l_l)
+        label.delete(trace.l_l)
+        trace.l_l := na
+
+is_new_custom_daily_bar(string hhmm) =>
+    string sessionStr = build_one_minute_session(sanitize_hhmm(hhmm))
+    not na(time(timeframe.period, sessionStr, TZ)) and na(time(timeframe.period, sessionStr, TZ)[1])
+
+clear_org() =>
+    while array.size(org_boxes) > 0
+        box.delete(array.pop(org_boxes))
+    while array.size(org_mid_lines) > 0
+        line.delete(array.pop(org_mid_lines))
+    while array.size(org_q25_lines) > 0
+        line.delete(array.pop(org_q25_lines))
+    while array.size(org_q75_lines) > 0
+        line.delete(array.pop(org_q75_lines))
+    while array.size(org_mid_labels) > 0
+        label.delete(array.pop(org_mid_labels))
+    while array.size(org_gap_directions) > 0
+        array.pop(org_gap_directions)
+
+prune_org(int keepCount) =>
+    while array.size(org_boxes) > keepCount
+        box.delete(array.pop(org_boxes))
+        if array.size(org_mid_lines) > 0
+            line.delete(array.pop(org_mid_lines))
+        if array.size(org_q25_lines) > 0
+            line.delete(array.pop(org_q25_lines))
+        if array.size(org_q75_lines) > 0
+            line.delete(array.pop(org_q75_lines))
+        if array.size(org_mid_labels) > 0
+            label.delete(array.pop(org_mid_labels))
+        if array.size(org_gap_directions) > 0
+            array.pop(org_gap_directions)
+
+update_org_line_style(line ln, bool showLine, color lnColor, string lnStyle, int lnWidth) =>
+    if not na(ln)
+        line.set_style(ln, line_style_from_string(lnStyle))
+        line.set_width(ln, lnWidth)
+        line.set_color(ln, showLine ? lnColor : na)
+
+run_org() =>
+    string org_session = build_session_from_ampm(org_start_hour, org_start_minute, org_start_ampm, org_end_hour, org_end_minute, org_end_ampm)
+    bool org_time_allowed = timeframe.in_seconds() <= timeframe.in_seconds(org_tf_limit)
+    bool in_gap = not na(time("", org_session, TZ))
+
+    if org_show and org_time_allowed
+        if in_gap and not in_gap[1]
+            if array.size(org_boxes) > 0
+                box.set_right(array.get(org_boxes, 0), time)
+                if array.size(org_mid_lines) > 0
+                    line.set_x2(array.get(org_mid_lines, 0), time)
+                if array.size(org_q25_lines) > 0
+                    line.set_x2(array.get(org_q25_lines, 0), time)
+                if array.size(org_q75_lines) > 0
+                    line.set_x2(array.get(org_q75_lines, 0), time)
+
+            float refPrice = close[1]
+            box newBox = box.new(time, refPrice, time, refPrice, xloc=xloc.bar_time, bgcolor=na, border_color=na, extend=org_extend ? extend.right : extend.none)
+            line newMid = line.new(time, refPrice, time, refPrice, xloc=xloc.bar_time, color=na, style=line_style_from_string(org_mid_style), width=org_mid_width, extend=org_extend ? extend.right : extend.none)
+            line newQ25 = line.new(time, refPrice, time, refPrice, xloc=xloc.bar_time, color=na, style=line_style_from_string(org_q25_style), width=org_q25_width, extend=org_extend ? extend.right : extend.none)
+            line newQ75 = line.new(time, refPrice, time, refPrice, xloc=xloc.bar_time, color=na, style=line_style_from_string(org_q75_style), width=org_q75_width, extend=org_extend ? extend.right : extend.none)
+            label newMidLabel = label.new(time, refPrice, "", xloc=xloc.bar_time, style=label.style_none, textcolor=org_up_mid_color, size=size.tiny)
+
+            array.unshift(org_boxes, newBox)
+            array.unshift(org_mid_lines, newMid)
+            array.unshift(org_q25_lines, newQ25)
+            array.unshift(org_q75_lines, newQ75)
+            array.unshift(org_mid_labels, newMidLabel)
+            array.unshift(org_gap_directions, true)
+
+        if not in_gap and in_gap[1]
+            if array.size(org_boxes) > 0
+                box activeBox = array.get(org_boxes, 0)
+                float startPrice = box.get_top(activeBox)
+                float openPrice = open
+                bool isGapUp = openPrice >= startPrice
+                float gapTop = math.max(startPrice, openPrice)
+                float gapBottom = math.min(startPrice, openPrice)
+                float gapHeight = gapTop - gapBottom
+                float midY = gapTop - gapHeight * 0.50
+                float q25Y = gapTop - gapHeight * 0.25
+                float q75Y = gapTop - gapHeight * 0.75
+
+                color midColor = isGapUp ? org_up_mid_color : org_dn_mid_color
+                color q25Color = isGapUp ? org_up_q25_color : org_dn_q25_color
+                color q75Color = isGapUp ? org_up_q75_color : org_dn_q75_color
+
+                box.set_right(activeBox, time)
+                box.set_top(activeBox, gapTop)
+                box.set_bottom(activeBox, gapBottom)
+                if array.size(org_gap_directions) > 0
+                    array.set(org_gap_directions, 0, isGapUp)
+
+                color fillColor = isGapUp ? org_gap_up_fill : org_gap_down_fill
+                box.set_bgcolor(activeBox, fillColor)
+                box.set_border_color(activeBox, fillColor)
+
+                if array.size(org_mid_lines) > 0
+                    line midLine = array.get(org_mid_lines, 0)
+                    line.set_x1(midLine, box.get_left(activeBox))
+                    line.set_y1(midLine, midY)
+                    line.set_x2(midLine, time)
+                    line.set_y2(midLine, midY)
+                    update_org_line_style(midLine, org_mid_show, midColor, org_mid_style, org_mid_width)
+
+                if array.size(org_q25_lines) > 0
+                    line q25Line = array.get(org_q25_lines, 0)
+                    line.set_x1(q25Line, box.get_left(activeBox))
+                    line.set_y1(q25Line, q25Y)
+                    line.set_x2(q25Line, time)
+                    line.set_y2(q25Line, q25Y)
+                    update_org_line_style(q25Line, org_q25_show, q25Color, org_q25_style, org_q25_width)
+
+                if array.size(org_q75_lines) > 0
+                    line q75Line = array.get(org_q75_lines, 0)
+                    line.set_x1(q75Line, box.get_left(activeBox))
+                    line.set_y1(q75Line, q75Y)
+                    line.set_x2(q75Line, time)
+                    line.set_y2(q75Line, q75Y)
+                    update_org_line_style(q75Line, org_q75_show, q75Color, org_q75_style, org_q75_width)
+
+                if array.size(org_mid_labels) > 0
+                    label midLabel = array.get(org_mid_labels, 0)
+                    int labelX = org_extend ? time : box.get_right(activeBox)
+                    label.set_x(midLabel, labelX)
+                    label.set_y(midLabel, midY)
+                    label.set_text(midLabel, format_org_date(box.get_left(activeBox)))
+                    label.set_textcolor(midLabel, midColor)
+                    label.set_size(midLabel, size.tiny)
+
+                prune_org(org_keep_last)
+
+        if not in_gap
+            if array.size(org_boxes) > 0
+                box activeBox = array.get(org_boxes, 0)
+                bool isGapUpNow = array.size(org_gap_directions) > 0 ? array.get(org_gap_directions, 0) : true
+                float gapTop = box.get_top(activeBox)
+                float gapBottom = box.get_bottom(activeBox)
+                float gapHeight = gapTop - gapBottom
+                float midY = gapTop - gapHeight * 0.50
+                float q25Y = gapTop - gapHeight * 0.25
+                float q75Y = gapTop - gapHeight * 0.75
+
+                color midColorNow = isGapUpNow ? org_up_mid_color : org_dn_mid_color
+                color q25ColorNow = isGapUpNow ? org_up_q25_color : org_dn_q25_color
+                color q75ColorNow = isGapUpNow ? org_up_q75_color : org_dn_q75_color
+
+                box.set_right(activeBox, time)
+
+                if array.size(org_mid_lines) > 0
+                    line midLine = array.get(org_mid_lines, 0)
+                    line.set_x2(midLine, time)
+                    line.set_y1(midLine, midY)
+                    line.set_y2(midLine, midY)
+                    update_org_line_style(midLine, org_mid_show, midColorNow, org_mid_style, org_mid_width)
+
+                if array.size(org_q25_lines) > 0
+                    line q25Line = array.get(org_q25_lines, 0)
+                    line.set_x2(q25Line, time)
+                    line.set_y1(q25Line, q25Y)
+                    line.set_y2(q25Line, q25Y)
+                    update_org_line_style(q25Line, org_q25_show, q25ColorNow, org_q25_style, org_q25_width)
+
+                if array.size(org_q75_lines) > 0
+                    line q75Line = array.get(org_q75_lines, 0)
+                    line.set_x2(q75Line, time)
+                    line.set_y1(q75Line, q75Y)
+                    line.set_y2(q75Line, q75Y)
+                    update_org_line_style(q75Line, org_q75_show, q75ColorNow, org_q75_style, org_q75_width)
+
+                if array.size(org_mid_labels) > 0
+                    label midLabel = array.get(org_mid_labels, 0)
+                    int labelX = org_extend ? time : box.get_right(activeBox)
+                    label.set_x(midLabel, labelX)
+                    label.set_y(midLabel, midY)
+                    label.set_text(midLabel, format_org_date(box.get_left(activeBox)))
+                    label.set_textcolor(midLabel, midColorNow)
+                    label.set_size(midLabel, size.tiny)
+    else
+        clear_org()
+
+//------------------------------------------------------------------------------
+// CandleSet methods
+//------------------------------------------------------------------------------
+method Reorder(CandleSet candleSet, int offset) =>
+    int size = candleSet.candles.size()
+    if size > 0
+        for i = size - 1 to 0 by 1
+            Candle candle = candleSet.candles.get(i)
+            int tBuffer = offset + (settings.width + settings.buffer) * (size - i - 1)
+            int bodyLeft = bar_index + tBuffer
+            int bodyRight = bar_index + settings.width + tBuffer
+            int wickX = bar_index + settings.width / 2 + tBuffer
+
+            box.set_left(candle.body, bodyLeft)
+            box.set_right(candle.body, bodyRight)
+            line.set_x1(candle.wick_up, wickX)
+            line.set_x2(candle.wick_up, wickX)
+            line.set_x1(candle.wick_down, wickX)
+            line.set_x2(candle.wick_down, wickX)
+    candleSet
+
+method Monitor(CandleSet candleSet) =>
+    int HTFBarTime = time(candleSet.settings.htf, TZ)
+    bool isNewHTFCandle = ta.change(HTFBarTime) > 0
+
+    if settings.use_custom_daily and candleSet.settings.htf == "1D"
+        isNewHTFCandle := is_new_custom_daily_bar(settings.custom_daily_time)
+
+    if isNewHTFCandle
+        Candle candle = Candle.new()
+        candle.o := open
+        candle.c := close
+        candle.h := high
+        candle.l := low
+        candle.o_idx := bar_index
+        candle.c_idx := bar_index
+        candle.h_idx := bar_index
+        candle.l_idx := bar_index
+
+        bool bull = candle.c >= candle.o
+        int bodyLeft = bar_index
+        int bodyRight = bar_index + settings.width
+        int wickX = bar_index + settings.width / 2
+
+        candle.body := box.new(bodyLeft, math.max(candle.o, candle.c), bodyRight, math.min(candle.o, candle.c), border_color=bull ? settings.bull_border : settings.bear_border, border_width=1, bgcolor=bull ? settings.bull_body : settings.bear_body)
+        candle.wick_up := line.new(wickX, candle.h, wickX, math.max(candle.o, candle.c), color=bull ? settings.bull_wick : settings.bear_wick)
+        candle.wick_down := line.new(wickX, math.min(candle.o, candle.c), wickX, candle.l, color=bull ? settings.bull_wick : settings.bear_wick)
+
+        candleSet.candles.unshift(candle)
+
+        if candleSet.candles.size() > candleSet.settings.max_display
+            Candle delCandle = array.pop(candleSet.candles)
+            box.delete(delCandle.body)
+            line.delete(delCandle.wick_up)
+            line.delete(delCandle.wick_down)
+    candleSet
+
+method Update(CandleSet candleSet, int offset) =>
+    if candleSet.candles.size() > 0
+        Candle candle = candleSet.candles.first()
+        candle.h_idx := high > candle.h ? bar_index : candle.h_idx
+        candle.h := math.max(candle.h, high)
+        candle.l_idx := low < candle.l ? bar_index : candle.l_idx
+        candle.l := math.min(candle.l, low)
+        candle.c := close
+        candle.c_idx := bar_index
+
+        bool bull = candle.c >= candle.o
+
+        box.set_top(candle.body, math.max(candle.o, candle.c))
+        box.set_bottom(candle.body, math.min(candle.o, candle.c))
+        box.set_bgcolor(candle.body, bull ? settings.bull_body : settings.bear_body)
+        box.set_border_color(candle.body, bull ? settings.bull_border : settings.bear_border)
+
+        line.set_color(candle.wick_up, bull ? settings.bull_wick : settings.bear_wick)
+        line.set_color(candle.wick_down, bull ? settings.bull_wick : settings.bear_wick)
+        line.set_y1(candle.wick_up, candle.h)
+        line.set_y2(candle.wick_up, math.max(candle.o, candle.c))
+        line.set_y1(candle.wick_down, math.min(candle.o, candle.c))
+        line.set_y2(candle.wick_down, candle.l)
+
+        if barstate.isrealtime or barstate.islast
+            candleSet.Reorder(offset)
+
+            if settings.trace_show
+                int bodyLeft = box.get_left(candle.body)
+                int bodyRight = box.get_right(candle.body)
+                int wickXUp = line.get_x1(candle.wick_up)
+                int wickXDown = line.get_x1(candle.wick_down)
+
+                if bar_index - candle.o_idx < 5000
+                    if na(trace.o)
+                        trace.o := line.new(candle.o_idx, candle.o, bodyLeft, candle.o, xloc=xloc.bar_index, color=settings.trace_o_color, style=line_style_from_string(settings.trace_o_style), width=settings.trace_o_size)
+                    else
+                        line.set_xy1(trace.o, candle.o_idx, candle.o)
+                        line.set_xy2(trace.o, bodyLeft, candle.o)
+
+                    if settings.price_label_show
+                        if na(trace.o_l)
+                            trace.o_l := label.new(bodyRight, candle.o, str.tostring(candle.o, format.mintick), textalign=text.align_center, style=label.style_label_left, size=settings.price_label_size, color=COLOR_TRANSPARENT, textcolor=settings.price_label_color)
+                        else
+                            label.set_xy(trace.o_l, bodyRight, candle.o)
+                            label.set_text(trace.o_l, str.tostring(candle.o, format.mintick))
+                    else
+                        if not na(trace.o_l)
+                            label.delete(trace.o_l)
+                            trace.o_l := na
+
+                if bar_index - candle.c_idx < 5000
+                    if na(trace.c)
+                        trace.c := line.new(candle.c_idx, candle.c, bodyLeft, candle.c, xloc=xloc.bar_index, color=settings.trace_c_color, style=line_style_from_string(settings.trace_c_style), width=settings.trace_c_size)
+                    else
+                        line.set_xy1(trace.c, candle.c_idx, candle.c)
+                        line.set_xy2(trace.c, bodyLeft, candle.c)
+
+                    if settings.price_label_show
+                        if na(trace.c_l)
+                            trace.c_l := label.new(bodyRight, candle.c, str.tostring(candle.c, format.mintick), textalign=text.align_center, style=label.style_label_left, size=settings.price_label_size, color=COLOR_TRANSPARENT, textcolor=settings.price_label_color)
+                        else
+                            label.set_xy(trace.c_l, bodyRight, candle.c)
+                            label.set_text(trace.c_l, str.tostring(candle.c, format.mintick))
+                    else
+                        if not na(trace.c_l)
+                            label.delete(trace.c_l)
+                            trace.c_l := na
+
+                if bar_index - candle.h_idx < 5000
+                    if na(trace.h)
+                        trace.h := line.new(candle.h_idx, candle.h, wickXUp, candle.h, xloc=xloc.bar_index, color=settings.trace_h_color, style=line_style_from_string(settings.trace_h_style), width=settings.trace_h_size)
+                    else
+                        line.set_xy1(trace.h, candle.h_idx, candle.h)
+                        line.set_xy2(trace.h, wickXUp, candle.h)
+
+                    if settings.price_label_show
+                        if na(trace.h_l)
+                            trace.h_l := label.new(bodyRight, candle.h, str.tostring(candle.h, format.mintick), textalign=text.align_center, style=label.style_label_left, size=settings.price_label_size, color=COLOR_TRANSPARENT, textcolor=settings.price_label_color)
+                        else
+                            label.set_xy(trace.h_l, bodyRight, candle.h)
+                            label.set_text(trace.h_l, str.tostring(candle.h, format.mintick))
+                    else
+                        if not na(trace.h_l)
+                            label.delete(trace.h_l)
+                            trace.h_l := na
+
+                if bar_index - candle.l_idx < 5000
+                    if na(trace.l)
+                        trace.l := line.new(candle.l_idx, candle.l, wickXDown, candle.l, xloc=xloc.bar_index, color=settings.trace_l_color, style=line_style_from_string(settings.trace_l_style), width=settings.trace_l_size)
+                    else
+                        line.set_xy1(trace.l, candle.l_idx, candle.l)
+                        line.set_xy2(trace.l, wickXDown, candle.l)
+
+                    if settings.price_label_show
+                        if na(trace.l_l)
+                            trace.l_l := label.new(bodyRight, candle.l, str.tostring(candle.l, format.mintick), textalign=text.align_center, style=label.style_label_left, size=settings.price_label_size, color=COLOR_TRANSPARENT, textcolor=settings.price_label_color)
+                        else
+                            label.set_xy(trace.l_l, bodyRight, candle.l)
+                            label.set_text(trace.l_l, str.tostring(candle.l, format.mintick))
+                    else
+                        if not na(trace.l_l)
+                            label.delete(trace.l_l)
+                            trace.l_l := na
+            else
+                clear_trace()
+    candleSet
+
+method Clear(CandleSet candleSet) =>
+    if candleSet.candles.size() > 0
+        for i = candleSet.candles.size() - 1 to 0 by 1
+            Candle c = candleSet.candles.get(i)
+            box.delete(c.body)
+            line.delete(c.wick_up)
+            line.delete(c.wick_down)
+            candleSet.candles.pop()
+    clear_trace()
+    candleSet
+
+//------------------------------------------------------------------------------
+// Main
+//------------------------------------------------------------------------------
+bool canShow = htf.settings.show and valid_timeframe(htf.settings.htf)
+
+if canShow
+    htf.Monitor().Update(settings.offset)
+else
+    htf.Clear()
+
+run_org()
