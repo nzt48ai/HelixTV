@@ -51,8 +51,6 @@ type Settings
     int offset
     int buffer
     int width
-    bool use_custom_daily
-    string custom_daily_time
     bool trace_show
     color trace_o_color
     string trace_o_style
@@ -101,22 +99,20 @@ var array<ORGRecord> org_records = array.new<ORGRecord>()
 // Inputs
 //------------------------------------------------------------------------------
 string group_source = "HTF Candles"
-string group_style = "Styling"
+string group_style = "Colors"
 string group_trace = "Key Levels"
 string group_org = "ORG (Opening Range Gaps)"
 string group_org_time = "ORG Time"
 string group_org_levels = "ORG Quadrants"
 
 htf.settings.show := input.bool(true, "On", group=group_source, display=display.none)
-htf_mode = input.string("Timeframe", "Custom Timeframe", options=["Timeframe", "Custom"], group=group_source, display=display.none)
-preset_htf = input.timeframe("1W", "Timeframe", group=group_source, display=display.none)
-_sep_htf = input.string("", "────────", options=[""], group=group_source, display=display.none)
-custom_unit = input.string("Hours", "Custom", options=["Minutes", "Hours"], inline="customtf", group=group_source, display=display.none)
-custom_value = input.int(7, "", minval=1, inline="customtf", group=group_source, display=display.none)
+use_custom_htf = input.bool(false, "Custom", group=group_source, display=display.none)
+preset_htf = input.timeframe("1W", "Timeframe", group=group_source, active=not use_custom_htf, display=display.none)
+custom_unit = input.string("Hours", "Custom Timeframe", options=["Minutes", "Hours"], inline="customtf", group=group_source, active=use_custom_htf, display=display.none)
+custom_value = input.int(7, "", minval=1, inline="customtf", group=group_source, active=use_custom_htf, display=display.none)
 htf.settings.max_display := input.int(1, "Candles to Display", minval=1, maxval=50, group=group_source, display=display.none)
 
-settings.use_custom_daily := input.bool(false, "Custom daily candle open", inline="customdaily", group=group_source, display=display.none)
-settings.custom_daily_time := input.string("0930", "HHMM", inline="customdaily", group=group_source, tooltip="Used only when HTF is 1D. Example: 0000, 0830, 0930, 1800", display=display.none)
+daily_boundary_mode = input.string("True Day", "Day Boundary", options=["True Day", "Standard"], group=group_source, display=display.none)
 
 settings.bull_body := input.color(#1dc677, "Bull Body", inline="body", group=group_style)
 settings.bear_body := input.color(#000000, "", inline="body", group=group_style)
@@ -125,70 +121,81 @@ settings.bear_border := input.color(#000000, "", inline="borders", group=group_s
 settings.bull_wick := input.color(#000000, "Wick", inline="wick", group=group_style)
 settings.bear_wick := input.color(#000000, "", inline="wick", group=group_style)
 
-settings.offset := input.int(10, "Padding from current candles", minval=1, group=group_style, display=display.none)
-settings.buffer := input.int(1, "Space between candles", minval=1, maxval=4, group=group_style, display=display.none)
-settings.width := input.int(1, "Candle Width", minval=1, maxval=4, group=group_style, display=display.none) * 2
+settings.offset := input.int(10, "Indent", minval=1, group=group_style, display=display.none)
+settings.buffer := input.int(1, "Padding", minval=1, maxval=4, group=group_style, display=display.none)
+settings.width := input.int(1, "Width", minval=1, maxval=4, group=group_style, display=display.none) * 2
 
 settings.trace_show := input.bool(false, "On", group=group_trace, display=display.none)
 settings.trace_o_color := input.color(color.new(color.gray, 50), "Open", inline="1", group=group_trace)
-settings.trace_o_style := input.string("....", "", options=["Solid", "----", "...."], inline="1", group=group_trace, display=display.none)
+settings.trace_o_style := input.string("....", "", options=["────", "----", "...."], inline="1", group=group_trace, display=display.none)
 settings.trace_o_size := input.int(1, "", options=[1, 2, 3, 4], inline="1", group=group_trace, display=display.none)
 
 settings.trace_c_color := input.color(color.new(color.gray, 50), "Close", inline="2", group=group_trace)
-settings.trace_c_style := input.string("....", "", options=["Solid", "----", "...."], inline="2", group=group_trace, display=display.none)
+settings.trace_c_style := input.string("....", "", options=["────", "----", "...."], inline="2", group=group_trace, display=display.none)
 settings.trace_c_size := input.int(1, "", options=[1, 2, 3, 4], inline="2", group=group_trace, display=display.none)
 
 settings.trace_h_color := input.color(color.new(color.gray, 50), "High", inline="3", group=group_trace)
-settings.trace_h_style := input.string("....", "", options=["Solid", "----", "...."], inline="3", group=group_trace, display=display.none)
+settings.trace_h_style := input.string("....", "", options=["────", "----", "...."], inline="3", group=group_trace, display=display.none)
 settings.trace_h_size := input.int(1, "", options=[1, 2, 3, 4], inline="3", group=group_trace, display=display.none)
 
 settings.trace_l_color := input.color(color.new(color.gray, 50), "Low", inline="4", group=group_trace)
-settings.trace_l_style := input.string("....", "", options=["Solid", "----", "...."], inline="4", group=group_trace, display=display.none)
+settings.trace_l_style := input.string("....", "", options=["────", "----", "...."], inline="4", group=group_trace, display=display.none)
 settings.trace_l_size := input.int(1, "", options=[1, 2, 3, 4], inline="4", group=group_trace, display=display.none)
 
-settings.price_label_show := input.bool(false, "Price Label", inline="label", group=group_trace, display=display.none)
+settings.price_label_show := input.bool(false, "Price", inline="label", group=group_trace, display=display.none)
 settings.price_label_color := input.color(#000000, "", inline="label", group=group_trace)
-settings.price_label_size := input.string(size.small, "", options=[size.tiny, size.small, size.normal, size.large, size.huge], inline="label", group=group_trace, display=display.none)
-
-_sep_org = input.string("", "────────", options=[""], group=group_trace, display=display.none)
+settings.price_label_size := input.string("10", "", options=["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", size.tiny, size.small, size.normal, size.large, size.huge], inline="label", group=group_trace, display=display.none)
 
 // ORG inputs
 org_show = input.bool(true, "On", group=group_org, display=display.none)
 org_extend = input.bool(true, "Extend Boxes", group=group_org, display=display.none)
-org_keep_last = input.int(1, "Keep Last", minval=1, group=group_org, display=display.none)
-org_tf_limit = input.timeframe("240", "Timeframe Limit", group=group_org, display=display.none)
+org_keep_last = input.int(1, "Show", minval=1, group=group_org, display=display.none)
+org_tf_limit = input.timeframe("240", "Visibility", group=group_org, display=display.none)
+org_date_show = input.bool(true, "Date", group=group_org, display=display.none)
+org_date_size = input.string("8", "Size", options=["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20"], group=group_org, display=display.none)
 
-org_start_hour = input.int(4, "Gap Start", minval=1, maxval=12, inline="orgstart", group=group_org_time, display=display.none)
+org_start_hour = input.int(4, "Start", minval=1, maxval=12, inline="orgstart", group=group_org_time, display=display.none)
 org_start_minute = input.int(14, "", minval=0, maxval=59, inline="orgstart", group=group_org_time, display=display.none)
 org_start_ampm = input.string("PM", "", options=["AM", "PM"], inline="orgstart", group=group_org_time, display=display.none)
 
-org_end_hour = input.int(9, "Gap End", minval=1, maxval=12, inline="orgend", group=group_org_time, display=display.none)
+org_end_hour = input.int(9, "Finish", minval=1, maxval=12, inline="orgend", group=group_org_time, display=display.none)
 org_end_minute = input.int(30, "", minval=0, maxval=59, inline="orgend", group=group_org_time, display=display.none)
 org_end_ampm = input.string("AM", "", options=["AM", "PM"], inline="orgend", group=group_org_time, display=display.none)
 
-org_gap_up_fill = input.color(color.new(#089981, 65), "Gap Up Fill", group=group_org, inline="orgfill", display=display.none)
+org_gap_up_fill = input.color(color.new(#089981, 65), "Colors", group=group_org, inline="orgfill", display=display.none)
 org_gap_down_fill = input.color(color.new(#f48fb1, 65), "", group=group_org, inline="orgfill", display=display.none)
 
+org_up_q75_color = input.color(#089981, "Up 75%", inline="q75up", group=group_org_levels, display=display.none)
+org_up_q75_show = input.bool(false, "", inline="q75up", group=group_org_levels, display=display.none)
+org_up_q75_style = input.string("....", "", options=["────", "----", "...."], inline="q75up", group=group_org_levels, display=display.none)
+org_up_q75_width = input.int(1, "", options=[1, 2, 3, 4], inline="q75up", group=group_org_levels, display=display.none)
+
 org_up_mid_color = input.color(#089981, "Up 50%", inline="midup", group=group_org_levels, display=display.none)
-org_mid_show = input.bool(true, "", inline="midup", group=group_org_levels, display=display.none)
-org_mid_style = input.string("....", "", options=["Solid", "----", "...."], inline="midup", group=group_org_levels, display=display.none)
-org_mid_width = input.int(1, "", options=[1, 2, 3, 4], inline="midup", group=group_org_levels, display=display.none)
+org_up_mid_show = input.bool(true, "", inline="midup", group=group_org_levels, display=display.none)
+org_up_mid_style = input.string("....", "", options=["────", "----", "...."], inline="midup", group=group_org_levels, display=display.none)
+org_up_mid_width = input.int(1, "", options=[1, 2, 3, 4], inline="midup", group=group_org_levels, display=display.none)
 
 org_up_q25_color = input.color(#089981, "Up 25%", inline="q25up", group=group_org_levels, display=display.none)
-org_q25_show = input.bool(false, "", inline="q25up", group=group_org_levels, display=display.none)
-org_q25_style = input.string("....", "", options=["Solid", "----", "...."], inline="q25up", group=group_org_levels, display=display.none)
-org_q25_width = input.int(1, "", options=[1, 2, 3, 4], inline="q25up", group=group_org_levels, display=display.none)
-
-org_up_q75_color = input.color(#089981, "Up 75%", inline="q75up", group=group_org_levels, display=display.none)
-org_q75_show = input.bool(false, "", inline="q75up", group=group_org_levels, display=display.none)
-org_q75_style = input.string("....", "", options=["Solid", "----", "...."], inline="q75up", group=group_org_levels, display=display.none)
-org_q75_width = input.int(1, "", options=[1, 2, 3, 4], inline="q75up", group=group_org_levels, display=display.none)
+org_up_q25_show = input.bool(false, "", inline="q25up", group=group_org_levels, display=display.none)
+org_up_q25_style = input.string("....", "", options=["────", "----", "...."], inline="q25up", group=group_org_levels, display=display.none)
+org_up_q25_width = input.int(1, "", options=[1, 2, 3, 4], inline="q25up", group=group_org_levels, display=display.none)
 
 org_dn_mid_color = input.color(#f06292, "Down 50%", inline="middn", group=group_org_levels, display=display.none)
-org_dn_q25_color = input.color(#f06292, "Down 25%", inline="q25dn", group=group_org_levels, display=display.none)
-org_dn_q75_color = input.color(#f06292, "Down 75%", inline="q75dn", group=group_org_levels, display=display.none)
+org_dn_mid_show = input.bool(true, "", inline="middn", group=group_org_levels, display=display.none)
+org_dn_mid_style = input.string("....", "", options=["────", "----", "...."], inline="middn", group=group_org_levels, display=display.none)
+org_dn_mid_width = input.int(1, "", options=[1, 2, 3, 4], inline="middn", group=group_org_levels, display=display.none)
 
-string selected_htf = htf_mode == "Timeframe" ? preset_htf : str.tostring(custom_unit == "Hours" ? custom_value * 60 : custom_value)
+org_dn_q25_color = input.color(#f06292, "Down 25%", inline="q25dn", group=group_org_levels, display=display.none)
+org_dn_q25_show = input.bool(false, "", inline="q25dn", group=group_org_levels, display=display.none)
+org_dn_q25_style = input.string("....", "", options=["────", "----", "...."], inline="q25dn", group=group_org_levels, display=display.none)
+org_dn_q25_width = input.int(1, "", options=[1, 2, 3, 4], inline="q25dn", group=group_org_levels, display=display.none)
+
+org_dn_q75_color = input.color(#f06292, "Down 75%", inline="q75dn", group=group_org_levels, display=display.none)
+org_dn_q75_show = input.bool(false, "", inline="q75dn", group=group_org_levels, display=display.none)
+org_dn_q75_style = input.string("....", "", options=["────", "----", "...."], inline="q75dn", group=group_org_levels, display=display.none)
+org_dn_q75_width = input.int(1, "", options=[1, 2, 3, 4], inline="q75dn", group=group_org_levels, display=display.none)
+
+string selected_htf = use_custom_htf ? str.tostring(custom_unit == "Hours" ? custom_value * 60 : custom_value) : preset_htf
 htf.settings.htf := selected_htf
 
 //------------------------------------------------------------------------------
@@ -196,9 +203,24 @@ htf.settings.htf := selected_htf
 //------------------------------------------------------------------------------
 line_style_from_string(string style) =>
     switch style
+        "────" => line.style_solid
+        "Solid" => line.style_solid
         "----" => line.style_dashed
         "...." => line.style_dotted
         => line.style_solid
+
+label_size_from_font(string fontSize) =>
+    int font = int(str.tonumber(fontSize))
+    if na(font)
+        switch fontSize
+            size.tiny => size.tiny
+            size.small => size.small
+            size.normal => size.normal
+            size.large => size.large
+            size.huge => size.huge
+            => size.small
+    else
+        font <= 9 ? size.tiny : font <= 11 ? size.small : font <= 13 ? size.normal : font <= 17 ? size.large : size.huge
 
 two_digit(int n) =>
     str.tostring(n, "00")
@@ -212,25 +234,15 @@ to_24_hour(int hour12, string ampm) =>
 build_session_from_ampm(int sh, int sm, string sap, int eh, int em, string eap) =>
     two_digit(to_24_hour(sh, sap)) + two_digit(sm) + "-" + two_digit(to_24_hour(eh, eap)) + two_digit(em)
 
-sanitize_hhmm(string raw) =>
-    string clean = str.replace_all(raw, ":", "")
-    bool validLen = str.length(clean) == 4
-    float parsed = validLen ? str.tonumber(clean) : na
-    bool validNum = not na(parsed)
-    int hh = validNum ? int(str.tonumber(str.substring(clean, 0, 2))) : 9
-    int mm = validNum ? int(str.tonumber(str.substring(clean, 2, 4))) : 30
-    hh := math.max(0, math.min(23, hh))
-    mm := math.max(0, math.min(59, mm))
-    two_digit(hh) + two_digit(mm)
+is_mode_boundary_bar(string htf, string mode) =>
+    int shiftMs = mode == "Standard" ? 6 * 60 * 60 * 1000 : 0
+    int tCur = time + shiftMs
+    int tPrev = nz(time[1], time) + shiftMs
 
-build_one_minute_session(string hhmm) =>
-    int hh = int(str.tonumber(str.substring(hhmm, 0, 2)))
-    int mm = int(str.tonumber(str.substring(hhmm, 2, 4)))
-    int total = hh * 60 + mm
-    int totalEnd = (total + 1) % 1440
-    int endHH = int(math.floor(totalEnd / 60))
-    int endMM = totalEnd % 60
-    hhmm + "-" + two_digit(endHH) + two_digit(endMM) + ":1234567"
+    bool newDay = year(tCur, TZ) != year(tPrev, TZ) or month(tCur, TZ) != month(tPrev, TZ) or dayofmonth(tCur, TZ) != dayofmonth(tPrev, TZ)
+    bool newWeek = weekofyear(tCur, TZ) != weekofyear(tPrev, TZ)
+
+    htf == "1D" ? newDay : htf == "1W" ? newWeek : false
 
 day_stamp(int dow) =>
     switch dow
@@ -279,10 +291,6 @@ clear_trace() =>
     if not na(trace.l_l)
         label.delete(trace.l_l)
         trace.l_l := na
-
-is_new_custom_daily_bar(string hhmm) =>
-    string sessionStr = build_one_minute_session(sanitize_hhmm(hhmm))
-    not na(time(timeframe.period, sessionStr, TZ)) and na(time(timeframe.period, sessionStr, TZ)[1])
 
 clear_org() =>
     while array.size(org_records) > 0
@@ -338,9 +346,9 @@ run_org() =>
 
             float refPrice = close[1]
             box newBox = box.new(time, refPrice, time, refPrice, xloc=xloc.bar_time, bgcolor=na, border_color=na, extend=org_extend ? extend.right : extend.none)
-            line newMid = line.new(time, refPrice, time, refPrice, xloc=xloc.bar_time, color=na, style=line_style_from_string(org_mid_style), width=org_mid_width, extend=org_extend ? extend.right : extend.none)
-            line newQ25 = line.new(time, refPrice, time, refPrice, xloc=xloc.bar_time, color=na, style=line_style_from_string(org_q25_style), width=org_q25_width, extend=org_extend ? extend.right : extend.none)
-            line newQ75 = line.new(time, refPrice, time, refPrice, xloc=xloc.bar_time, color=na, style=line_style_from_string(org_q75_style), width=org_q75_width, extend=org_extend ? extend.right : extend.none)
+            line newMid = line.new(time, refPrice, time, refPrice, xloc=xloc.bar_time, color=na, style=line_style_from_string(org_up_mid_style), width=org_up_mid_width, extend=org_extend ? extend.right : extend.none)
+            line newQ25 = line.new(time, refPrice, time, refPrice, xloc=xloc.bar_time, color=na, style=line_style_from_string(org_up_q25_style), width=org_up_q25_width, extend=org_extend ? extend.right : extend.none)
+            line newQ75 = line.new(time, refPrice, time, refPrice, xloc=xloc.bar_time, color=na, style=line_style_from_string(org_up_q75_style), width=org_up_q75_width, extend=org_extend ? extend.right : extend.none)
             label newMidLabel = label.new(time, refPrice, "", xloc=xloc.bar_time, style=label.style_none, textcolor=org_up_mid_color, size=size.tiny)
 
             ORGRecord newRec = ORGRecord.new()
@@ -370,6 +378,15 @@ run_org() =>
                     color midColor = isGapUp ? org_up_mid_color : org_dn_mid_color
                     color q25Color = isGapUp ? org_up_q25_color : org_dn_q25_color
                     color q75Color = isGapUp ? org_up_q75_color : org_dn_q75_color
+                    bool midShow = isGapUp ? org_up_mid_show : org_dn_mid_show
+                    string midStyle = isGapUp ? org_up_mid_style : org_dn_mid_style
+                    int midWidth = isGapUp ? org_up_mid_width : org_dn_mid_width
+                    bool q25Show = isGapUp ? org_up_q25_show : org_dn_q25_show
+                    string q25Style = isGapUp ? org_up_q25_style : org_dn_q25_style
+                    int q25Width = isGapUp ? org_up_q25_width : org_dn_q25_width
+                    bool q75Show = isGapUp ? org_up_q75_show : org_dn_q75_show
+                    string q75Style = isGapUp ? org_up_q75_style : org_dn_q75_style
+                    int q75Width = isGapUp ? org_up_q75_width : org_dn_q75_width
 
                     box.set_right(activeBox, time)
                     box.set_top(activeBox, gapTop)
@@ -386,7 +403,7 @@ run_org() =>
                         line.set_y1(midLine, midY)
                         line.set_x2(midLine, time)
                         line.set_y2(midLine, midY)
-                        update_org_line_style(midLine, org_mid_show, midColor, org_mid_style, org_mid_width)
+                        update_org_line_style(midLine, midShow, midColor, midStyle, midWidth)
 
                     line q25Line = rec.q25_line
                     if not na(q25Line)
@@ -394,7 +411,7 @@ run_org() =>
                         line.set_y1(q25Line, q25Y)
                         line.set_x2(q25Line, time)
                         line.set_y2(q25Line, q25Y)
-                        update_org_line_style(q25Line, org_q25_show, q25Color, org_q25_style, org_q25_width)
+                        update_org_line_style(q25Line, q25Show, q25Color, q25Style, q25Width)
 
                     line q75Line = rec.q75_line
                     if not na(q75Line)
@@ -402,16 +419,15 @@ run_org() =>
                         line.set_y1(q75Line, q75Y)
                         line.set_x2(q75Line, time)
                         line.set_y2(q75Line, q75Y)
-                        update_org_line_style(q75Line, org_q75_show, q75Color, org_q75_style, org_q75_width)
+                        update_org_line_style(q75Line, q75Show, q75Color, q75Style, q75Width)
 
                     label midLabel = rec.mid_label
                     if not na(midLabel)
-                        int labelX = org_extend ? time : box.get_right(activeBox)
-                        label.set_x(midLabel, labelX)
+                        label.set_x(midLabel, time)
                         label.set_y(midLabel, midY)
-                        label.set_text(midLabel, format_org_date(box.get_left(activeBox)))
-                        label.set_textcolor(midLabel, midColor)
-                        label.set_size(midLabel, size.tiny)
+                        label.set_text(midLabel, org_date_show ? format_org_date(box.get_left(activeBox)) : "")
+                        label.set_textcolor(midLabel, org_date_show ? midColor : na)
+                        label.set_size(midLabel, label_size_from_font(org_date_size))
                     array.set(org_records, 0, rec)
 
                     prune_org(org_keep_last)
@@ -432,6 +448,15 @@ run_org() =>
                     color midColorNow = isGapUpNow ? org_up_mid_color : org_dn_mid_color
                     color q25ColorNow = isGapUpNow ? org_up_q25_color : org_dn_q25_color
                     color q75ColorNow = isGapUpNow ? org_up_q75_color : org_dn_q75_color
+                    bool midShowNow = isGapUpNow ? org_up_mid_show : org_dn_mid_show
+                    string midStyleNow = isGapUpNow ? org_up_mid_style : org_dn_mid_style
+                    int midWidthNow = isGapUpNow ? org_up_mid_width : org_dn_mid_width
+                    bool q25ShowNow = isGapUpNow ? org_up_q25_show : org_dn_q25_show
+                    string q25StyleNow = isGapUpNow ? org_up_q25_style : org_dn_q25_style
+                    int q25WidthNow = isGapUpNow ? org_up_q25_width : org_dn_q25_width
+                    bool q75ShowNow = isGapUpNow ? org_up_q75_show : org_dn_q75_show
+                    string q75StyleNow = isGapUpNow ? org_up_q75_style : org_dn_q75_style
+                    int q75WidthNow = isGapUpNow ? org_up_q75_width : org_dn_q75_width
 
                     box.set_right(activeBox, time)
 
@@ -440,30 +465,29 @@ run_org() =>
                         line.set_x2(midLine, time)
                         line.set_y1(midLine, midY)
                         line.set_y2(midLine, midY)
-                        update_org_line_style(midLine, org_mid_show, midColorNow, org_mid_style, org_mid_width)
+                        update_org_line_style(midLine, midShowNow, midColorNow, midStyleNow, midWidthNow)
 
                     line q25Line = rec.q25_line
                     if not na(q25Line)
                         line.set_x2(q25Line, time)
                         line.set_y1(q25Line, q25Y)
                         line.set_y2(q25Line, q25Y)
-                        update_org_line_style(q25Line, org_q25_show, q25ColorNow, org_q25_style, org_q25_width)
+                        update_org_line_style(q25Line, q25ShowNow, q25ColorNow, q25StyleNow, q25WidthNow)
 
                     line q75Line = rec.q75_line
                     if not na(q75Line)
                         line.set_x2(q75Line, time)
                         line.set_y1(q75Line, q75Y)
                         line.set_y2(q75Line, q75Y)
-                        update_org_line_style(q75Line, org_q75_show, q75ColorNow, org_q75_style, org_q75_width)
+                        update_org_line_style(q75Line, q75ShowNow, q75ColorNow, q75StyleNow, q75WidthNow)
 
                     label midLabel = rec.mid_label
                     if not na(midLabel)
-                        int labelX = org_extend ? time : box.get_right(activeBox)
-                        label.set_x(midLabel, labelX)
+                        label.set_x(midLabel, time)
                         label.set_y(midLabel, midY)
-                        label.set_text(midLabel, format_org_date(box.get_left(activeBox)))
-                        label.set_textcolor(midLabel, midColorNow)
-                        label.set_size(midLabel, size.tiny)
+                        label.set_text(midLabel, org_date_show ? format_org_date(box.get_left(activeBox)) : "")
+                        label.set_textcolor(midLabel, org_date_show ? midColorNow : na)
+                        label.set_size(midLabel, label_size_from_font(org_date_size))
     else
         clear_org()
 
@@ -492,8 +516,8 @@ method Monitor(CandleSet candleSet) =>
     int HTFBarTime = time(candleSet.settings.htf, TZ)
     bool isNewHTFCandle = ta.change(HTFBarTime) > 0
 
-    if settings.use_custom_daily and candleSet.settings.htf == "1D"
-        isNewHTFCandle := is_new_custom_daily_bar(settings.custom_daily_time)
+    if candleSet.settings.htf == "1D" or candleSet.settings.htf == "1W"
+        isNewHTFCandle := is_mode_boundary_bar(candleSet.settings.htf, daily_boundary_mode)
 
     if isNewHTFCandle
         Candle candle = Candle.new()
@@ -566,7 +590,7 @@ method Update(CandleSet candleSet, int offset) =>
 
                     if settings.price_label_show
                         if na(trace.o_l)
-                            trace.o_l := label.new(bodyRight, candle.o, str.tostring(candle.o, format.mintick), textalign=text.align_center, style=label.style_label_left, size=settings.price_label_size, color=COLOR_TRANSPARENT, textcolor=settings.price_label_color)
+                            trace.o_l := label.new(bodyRight, candle.o, str.tostring(candle.o, format.mintick), textalign=text.align_center, style=label.style_label_left, size=label_size_from_font(settings.price_label_size), color=COLOR_TRANSPARENT, textcolor=settings.price_label_color)
                         else
                             label.set_xy(trace.o_l, bodyRight, candle.o)
                             label.set_text(trace.o_l, str.tostring(candle.o, format.mintick))
@@ -584,7 +608,7 @@ method Update(CandleSet candleSet, int offset) =>
 
                     if settings.price_label_show
                         if na(trace.c_l)
-                            trace.c_l := label.new(bodyRight, candle.c, str.tostring(candle.c, format.mintick), textalign=text.align_center, style=label.style_label_left, size=settings.price_label_size, color=COLOR_TRANSPARENT, textcolor=settings.price_label_color)
+                            trace.c_l := label.new(bodyRight, candle.c, str.tostring(candle.c, format.mintick), textalign=text.align_center, style=label.style_label_left, size=label_size_from_font(settings.price_label_size), color=COLOR_TRANSPARENT, textcolor=settings.price_label_color)
                         else
                             label.set_xy(trace.c_l, bodyRight, candle.c)
                             label.set_text(trace.c_l, str.tostring(candle.c, format.mintick))
@@ -602,7 +626,7 @@ method Update(CandleSet candleSet, int offset) =>
 
                     if settings.price_label_show
                         if na(trace.h_l)
-                            trace.h_l := label.new(bodyRight, candle.h, str.tostring(candle.h, format.mintick), textalign=text.align_center, style=label.style_label_left, size=settings.price_label_size, color=COLOR_TRANSPARENT, textcolor=settings.price_label_color)
+                            trace.h_l := label.new(bodyRight, candle.h, str.tostring(candle.h, format.mintick), textalign=text.align_center, style=label.style_label_left, size=label_size_from_font(settings.price_label_size), color=COLOR_TRANSPARENT, textcolor=settings.price_label_color)
                         else
                             label.set_xy(trace.h_l, bodyRight, candle.h)
                             label.set_text(trace.h_l, str.tostring(candle.h, format.mintick))
@@ -620,7 +644,7 @@ method Update(CandleSet candleSet, int offset) =>
 
                     if settings.price_label_show
                         if na(trace.l_l)
-                            trace.l_l := label.new(bodyRight, candle.l, str.tostring(candle.l, format.mintick), textalign=text.align_center, style=label.style_label_left, size=settings.price_label_size, color=COLOR_TRANSPARENT, textcolor=settings.price_label_color)
+                            trace.l_l := label.new(bodyRight, candle.l, str.tostring(candle.l, format.mintick), textalign=text.align_center, style=label.style_label_left, size=label_size_from_font(settings.price_label_size), color=COLOR_TRANSPARENT, textcolor=settings.price_label_color)
                         else
                             label.set_xy(trace.l_l, bodyRight, candle.l)
                             label.set_text(trace.l_l, str.tostring(candle.l, format.mintick))
