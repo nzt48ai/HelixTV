@@ -74,6 +74,14 @@ type CandleSet
     array<Candle> candles
     CandleSettings settings
 
+type ORGRecord
+    box gap_box
+    line mid_line
+    line q25_line
+    line q75_line
+    label mid_label
+    bool is_gap_up
+
 //------------------------------------------------------------------------------
 // Globals
 //------------------------------------------------------------------------------
@@ -87,12 +95,7 @@ var CandleSet htf = CandleSet.new()
 htf.settings := settingsHTF
 htf.candles := candles
 
-var box[] org_boxes = array.new_box()
-var line[] org_mid_lines = array.new_line()
-var line[] org_q25_lines = array.new_line()
-var line[] org_q75_lines = array.new_line()
-var label[] org_mid_labels = array.new_label()
-var bool[] org_gap_directions = array.new_bool()
+var array<ORGRecord> org_records = array.new<ORGRecord>()
 
 //------------------------------------------------------------------------------
 // Inputs
@@ -282,32 +285,22 @@ is_new_custom_daily_bar(string hhmm) =>
     not na(time(timeframe.period, sessionStr, TZ)) and na(time(timeframe.period, sessionStr, TZ)[1])
 
 clear_org() =>
-    while array.size(org_boxes) > 0
-        box.delete(array.pop(org_boxes))
-    while array.size(org_mid_lines) > 0
-        line.delete(array.pop(org_mid_lines))
-    while array.size(org_q25_lines) > 0
-        line.delete(array.pop(org_q25_lines))
-    while array.size(org_q75_lines) > 0
-        line.delete(array.pop(org_q75_lines))
-    while array.size(org_mid_labels) > 0
-        label.delete(array.pop(org_mid_labels))
-    while array.size(org_gap_directions) > 0
-        array.pop(org_gap_directions)
+    while array.size(org_records) > 0
+        ORGRecord rec = array.pop(org_records)
+        box.delete(rec.gap_box)
+        line.delete(rec.mid_line)
+        line.delete(rec.q25_line)
+        line.delete(rec.q75_line)
+        label.delete(rec.mid_label)
 
 prune_org(int keepCount) =>
-    while array.size(org_boxes) > keepCount
-        box.delete(array.pop(org_boxes))
-        if array.size(org_mid_lines) > 0
-            line.delete(array.pop(org_mid_lines))
-        if array.size(org_q25_lines) > 0
-            line.delete(array.pop(org_q25_lines))
-        if array.size(org_q75_lines) > 0
-            line.delete(array.pop(org_q75_lines))
-        if array.size(org_mid_labels) > 0
-            label.delete(array.pop(org_mid_labels))
-        if array.size(org_gap_directions) > 0
-            array.pop(org_gap_directions)
+    while array.size(org_records) > keepCount
+        ORGRecord rec = array.pop(org_records)
+        box.delete(rec.gap_box)
+        line.delete(rec.mid_line)
+        line.delete(rec.q25_line)
+        line.delete(rec.q75_line)
+        label.delete(rec.mid_label)
 
 update_org_line_style(line ln, bool showLine, color lnColor, string lnStyle, int lnWidth) =>
     if not na(ln)
@@ -322,14 +315,12 @@ run_org() =>
 
     if org_show and org_time_allowed
         if in_gap and not in_gap[1]
-            if array.size(org_boxes) > 0
-                box.set_right(array.get(org_boxes, 0), time)
-                if array.size(org_mid_lines) > 0
-                    line.set_x2(array.get(org_mid_lines, 0), time)
-                if array.size(org_q25_lines) > 0
-                    line.set_x2(array.get(org_q25_lines, 0), time)
-                if array.size(org_q75_lines) > 0
-                    line.set_x2(array.get(org_q75_lines, 0), time)
+            if array.size(org_records) > 0
+                ORGRecord prevRec = array.get(org_records, 0)
+                box.set_right(prevRec.gap_box, time)
+                line.set_x2(prevRec.mid_line, time)
+                line.set_x2(prevRec.q25_line, time)
+                line.set_x2(prevRec.q75_line, time)
 
             float refPrice = close[1]
             box newBox = box.new(time, refPrice, time, refPrice, xloc=xloc.bar_time, bgcolor=na, border_color=na, extend=org_extend ? extend.right : extend.none)
@@ -338,16 +329,19 @@ run_org() =>
             line newQ75 = line.new(time, refPrice, time, refPrice, xloc=xloc.bar_time, color=na, style=line_style_from_string(org_q75_style), width=org_q75_width, extend=org_extend ? extend.right : extend.none)
             label newMidLabel = label.new(time, refPrice, "", xloc=xloc.bar_time, style=label.style_none, textcolor=org_up_mid_color, size=size.tiny)
 
-            array.unshift(org_boxes, newBox)
-            array.unshift(org_mid_lines, newMid)
-            array.unshift(org_q25_lines, newQ25)
-            array.unshift(org_q75_lines, newQ75)
-            array.unshift(org_mid_labels, newMidLabel)
-            array.unshift(org_gap_directions, true)
+            ORGRecord newRec = ORGRecord.new()
+            newRec.gap_box := newBox
+            newRec.mid_line := newMid
+            newRec.q25_line := newQ25
+            newRec.q75_line := newQ75
+            newRec.mid_label := newMidLabel
+            newRec.is_gap_up := true
+            array.unshift(org_records, newRec)
 
         if not in_gap and in_gap[1]
-            if array.size(org_boxes) > 0
-                box activeBox = array.get(org_boxes, 0)
+            if array.size(org_records) > 0
+                ORGRecord rec = array.get(org_records, 0)
+                box activeBox = rec.gap_box
                 float startPrice = box.get_top(activeBox)
                 float openPrice = open
                 bool isGapUp = openPrice >= startPrice
@@ -365,52 +359,49 @@ run_org() =>
                 box.set_right(activeBox, time)
                 box.set_top(activeBox, gapTop)
                 box.set_bottom(activeBox, gapBottom)
-                if array.size(org_gap_directions) > 0
-                    array.set(org_gap_directions, 0, isGapUp)
+                rec.is_gap_up := isGapUp
 
                 color fillColor = isGapUp ? org_gap_up_fill : org_gap_down_fill
                 box.set_bgcolor(activeBox, fillColor)
                 box.set_border_color(activeBox, fillColor)
 
-                if array.size(org_mid_lines) > 0
-                    line midLine = array.get(org_mid_lines, 0)
-                    line.set_x1(midLine, box.get_left(activeBox))
-                    line.set_y1(midLine, midY)
-                    line.set_x2(midLine, time)
-                    line.set_y2(midLine, midY)
-                    update_org_line_style(midLine, org_mid_show, midColor, org_mid_style, org_mid_width)
+                line midLine = rec.mid_line
+                line.set_x1(midLine, box.get_left(activeBox))
+                line.set_y1(midLine, midY)
+                line.set_x2(midLine, time)
+                line.set_y2(midLine, midY)
+                update_org_line_style(midLine, org_mid_show, midColor, org_mid_style, org_mid_width)
 
-                if array.size(org_q25_lines) > 0
-                    line q25Line = array.get(org_q25_lines, 0)
-                    line.set_x1(q25Line, box.get_left(activeBox))
-                    line.set_y1(q25Line, q25Y)
-                    line.set_x2(q25Line, time)
-                    line.set_y2(q25Line, q25Y)
-                    update_org_line_style(q25Line, org_q25_show, q25Color, org_q25_style, org_q25_width)
+                line q25Line = rec.q25_line
+                line.set_x1(q25Line, box.get_left(activeBox))
+                line.set_y1(q25Line, q25Y)
+                line.set_x2(q25Line, time)
+                line.set_y2(q25Line, q25Y)
+                update_org_line_style(q25Line, org_q25_show, q25Color, org_q25_style, org_q25_width)
 
-                if array.size(org_q75_lines) > 0
-                    line q75Line = array.get(org_q75_lines, 0)
-                    line.set_x1(q75Line, box.get_left(activeBox))
-                    line.set_y1(q75Line, q75Y)
-                    line.set_x2(q75Line, time)
-                    line.set_y2(q75Line, q75Y)
-                    update_org_line_style(q75Line, org_q75_show, q75Color, org_q75_style, org_q75_width)
+                line q75Line = rec.q75_line
+                line.set_x1(q75Line, box.get_left(activeBox))
+                line.set_y1(q75Line, q75Y)
+                line.set_x2(q75Line, time)
+                line.set_y2(q75Line, q75Y)
+                update_org_line_style(q75Line, org_q75_show, q75Color, org_q75_style, org_q75_width)
 
-                if array.size(org_mid_labels) > 0
-                    label midLabel = array.get(org_mid_labels, 0)
-                    int labelX = org_extend ? time : box.get_right(activeBox)
-                    label.set_x(midLabel, labelX)
-                    label.set_y(midLabel, midY)
-                    label.set_text(midLabel, format_org_date(box.get_left(activeBox)))
-                    label.set_textcolor(midLabel, midColor)
-                    label.set_size(midLabel, size.tiny)
+                label midLabel = rec.mid_label
+                int labelX = org_extend ? time : box.get_right(activeBox)
+                label.set_x(midLabel, labelX)
+                label.set_y(midLabel, midY)
+                label.set_text(midLabel, format_org_date(box.get_left(activeBox)))
+                label.set_textcolor(midLabel, midColor)
+                label.set_size(midLabel, size.tiny)
+                array.set(org_records, 0, rec)
 
                 prune_org(org_keep_last)
 
         if not in_gap
-            if array.size(org_boxes) > 0
-                box activeBox = array.get(org_boxes, 0)
-                bool isGapUpNow = array.size(org_gap_directions) > 0 ? array.get(org_gap_directions, 0) : true
+            if array.size(org_records) > 0
+                ORGRecord rec = array.get(org_records, 0)
+                box activeBox = rec.gap_box
+                bool isGapUpNow = rec.is_gap_up
                 float gapTop = box.get_top(activeBox)
                 float gapBottom = box.get_bottom(activeBox)
                 float gapHeight = gapTop - gapBottom
@@ -424,35 +415,31 @@ run_org() =>
 
                 box.set_right(activeBox, time)
 
-                if array.size(org_mid_lines) > 0
-                    line midLine = array.get(org_mid_lines, 0)
-                    line.set_x2(midLine, time)
-                    line.set_y1(midLine, midY)
-                    line.set_y2(midLine, midY)
-                    update_org_line_style(midLine, org_mid_show, midColorNow, org_mid_style, org_mid_width)
+                line midLine = rec.mid_line
+                line.set_x2(midLine, time)
+                line.set_y1(midLine, midY)
+                line.set_y2(midLine, midY)
+                update_org_line_style(midLine, org_mid_show, midColorNow, org_mid_style, org_mid_width)
 
-                if array.size(org_q25_lines) > 0
-                    line q25Line = array.get(org_q25_lines, 0)
-                    line.set_x2(q25Line, time)
-                    line.set_y1(q25Line, q25Y)
-                    line.set_y2(q25Line, q25Y)
-                    update_org_line_style(q25Line, org_q25_show, q25ColorNow, org_q25_style, org_q25_width)
+                line q25Line = rec.q25_line
+                line.set_x2(q25Line, time)
+                line.set_y1(q25Line, q25Y)
+                line.set_y2(q25Line, q25Y)
+                update_org_line_style(q25Line, org_q25_show, q25ColorNow, org_q25_style, org_q25_width)
 
-                if array.size(org_q75_lines) > 0
-                    line q75Line = array.get(org_q75_lines, 0)
-                    line.set_x2(q75Line, time)
-                    line.set_y1(q75Line, q75Y)
-                    line.set_y2(q75Line, q75Y)
-                    update_org_line_style(q75Line, org_q75_show, q75ColorNow, org_q75_style, org_q75_width)
+                line q75Line = rec.q75_line
+                line.set_x2(q75Line, time)
+                line.set_y1(q75Line, q75Y)
+                line.set_y2(q75Line, q75Y)
+                update_org_line_style(q75Line, org_q75_show, q75ColorNow, org_q75_style, org_q75_width)
 
-                if array.size(org_mid_labels) > 0
-                    label midLabel = array.get(org_mid_labels, 0)
-                    int labelX = org_extend ? time : box.get_right(activeBox)
-                    label.set_x(midLabel, labelX)
-                    label.set_y(midLabel, midY)
-                    label.set_text(midLabel, format_org_date(box.get_left(activeBox)))
-                    label.set_textcolor(midLabel, midColorNow)
-                    label.set_size(midLabel, size.tiny)
+                label midLabel = rec.mid_label
+                int labelX = org_extend ? time : box.get_right(activeBox)
+                label.set_x(midLabel, labelX)
+                label.set_y(midLabel, midY)
+                label.set_text(midLabel, format_org_date(box.get_left(activeBox)))
+                label.set_textcolor(midLabel, midColorNow)
+                label.set_size(midLabel, size.tiny)
     else
         clear_org()
 
